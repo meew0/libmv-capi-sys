@@ -1,17 +1,28 @@
 use std::env;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
-    println!("cargo:rerun-if-changed=libmv-c.h");
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
+    Command::new("make")
+        .current_dir(Path::new(&manifest_dir).join("libmv"))
+        .arg("release")
+        .status()
+        .expect("failed to run make");
+
     let libmv_library_dir = Path::new(&manifest_dir).join("libmv/bin-opt/lib");
+    if !libmv_library_dir.join("libmultiview.so").exists() {
+        panic!("Missing compiled libmultiview.so!");
+    }
+
     println!(
         "cargo:rustc-link-search=native={}",
         libmv_library_dir.display()
     );
-
     println!("cargo:rustc-link-lib=multiview");
+
+    // Compilation script adapted from https://github.com/h33p/ofps/blob/b18a0dda2981def429634834b4bce0acfbeffa22/libmv-rust/build.rs
 
     let src = [
         "capi/intern/autotrack.cc",
