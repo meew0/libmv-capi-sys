@@ -20,7 +20,29 @@ fn main() {
         "cargo:rustc-link-search=native={}",
         libmv_library_dir.display()
     );
+
+    // libmv libraries
+    // TODO: investigate whether it's possible to bundle all of these into one,
+    // to avoid this mess...
+    println!("cargo:rustc-link-lib=autotrack");
+    println!("cargo:rustc-link-lib=base");
+    println!("cargo:rustc-link-lib=camera");
+    println!("cargo:rustc-link-lib=correspondence");
+    println!("cargo:rustc-link-lib=descriptor");
+    println!("cargo:rustc-link-lib=detector");
+    println!("cargo:rustc-link-lib=image");
+    println!("cargo:rustc-link-lib=image_io");
     println!("cargo:rustc-link-lib=multiview");
+    println!("cargo:rustc-link-lib=numeric");
+    println!("cargo:rustc-link-lib=reconstruction");
+    println!("cargo:rustc-link-lib=simple_pipeline");
+    println!("cargo:rustc-link-lib=tools");
+    println!("cargo:rustc-link-lib=tracking");
+
+    // Dependencies required for the C API wrapper itself
+    println!("cargo:rustc-link-lib=png");
+    println!("cargo:rustc-link-lib=gflags");
+    println!("cargo:rustc-link-lib=glog");
 
     // Compilation script adapted from https://github.com/h33p/ofps/blob/b18a0dda2981def429634834b4bce0acfbeffa22/libmv-rust/build.rs
 
