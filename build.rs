@@ -2,22 +2,57 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn build_libmv(manifest_dir: &str) {
+    let libmv_src = Path::new(manifest_dir).join("libmv/src");
+    let bin_dir = Path::new(manifest_dir).join("libmv/bin-static-minimal");
+    std::fs::create_dir_all(&bin_dir).expect("failed to create bin-static-minimal dir");
+
+    let eigen_dir = Path::new(manifest_dir).join("libmv/src/third_party/eigen");
+
+    // Configure
+    let mut command = Command::new("cmake");
+    command
+        .current_dir(&bin_dir)
+        .arg("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
+        .arg("-DBUILD_SHARED_LIBS=OFF")
+        .arg("-DCMAKE_BUILD_TYPE=Release")
+        .arg(format!("-DEIGEN_INCLUDE_DIR={}", eigen_dir.display()))
+        .arg("-DSUITESPARSE=OFF")
+        .arg("-DCXSPARSE=OFF")
+        .arg("-DLAPACK=OFF")
+        .arg("-DOPENMP=OFF");
+
+    #[cfg(windows)]
+    command.arg("-DMINIGLOG=ON");
+
+    let status = command
+        .arg("-DBUILD_TESTING=OFF")
+        .arg("-DCMAKE_SKIP_INSTALL_RULES=TRUE")
+        .arg(&libmv_src)
+        .status()
+        .expect("cmake configure failed");
+
+    assert!(status.success(), "cmake configure step failed");
+
+    // Build
+    let status = Command::new("cmake")
+        .current_dir(&bin_dir)
+        .arg("--build")
+        .arg(".")
+        .arg("--config")
+        .arg("Release")
+        .arg("--parallel")
+        .arg("8")
+        .status()
+        .expect("cmake build failed");
+
+    assert!(status.success(), "cmake build step failed");
+}
+
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    #[cfg(windows)]
-    build_libmv_windows(&manifest_dir);
-
-    #[cfg(not(windows))]
-    Command::new("make")
-        .current_dir(Path::new(&manifest_dir).join("libmv"))
-        .arg(if cfg!(feature = "dynamic") {
-            "release"
-        } else {
-            "static"
-        })
-        .status()
-        .expect("failed to run make");
+    build_libmv(&manifest_dir);
 
     let libmv_library_dir = if cfg!(feature = "dynamic") {
         let libmv_library_dir = Path::new(&manifest_dir).join("libmv/bin-opt/lib");
@@ -28,8 +63,8 @@ fn main() {
     } else {
         #[cfg(windows)]
         let libmv_library_dir = {
-            // CMakeLists.txt sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE to bin-static/lib directly
-            let d = Path::new(&manifest_dir).join("libmv/bin-static/lib");
+            // CMakeLists.txt sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE to bin-static-minimal/lib directly
+            let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
             if !d.join("multiview.lib").exists() {
                 panic!("Missing compiled multiview.lib! (libmv build failure?)");
             }
@@ -37,7 +72,7 @@ fn main() {
         };
         #[cfg(not(windows))]
         let libmv_library_dir = {
-            let d = Path::new(&manifest_dir).join("libmv/bin-static/lib");
+            let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
             if !d.join("libmultiview.a").exists() {
                 panic!("Missing compiled libmultiview.a! (libmv build failure?)");
             }
@@ -99,16 +134,6 @@ fn main() {
         println!("cargo:rustc-link-lib=static=ldl");
         println!("cargo:rustc-link-lib=static=V3D");
         println!("cargo:rustc-link-lib=static=ceres");
-
-        // Dependencies of Ceres/Eigen — not needed on Windows (SuiteSparse/OpenMP disabled)
-        #[cfg(not(windows))]
-        {
-            println!("cargo:rustc-link-lib=dylib=gomp");
-            println!("cargo:rustc-link-lib=dylib=cholmod");
-            println!("cargo:rustc-link-lib=dylib=cxsparse");
-            println!("cargo:rustc-link-lib=dylib=spqr");
-            println!("cargo:rustc-link-lib=dylib=blas");
-        }
     }
 
     // libpng + zlib: on Linux these are system dylibs; on Windows built statically by libmv's cmake
@@ -179,47 +204,4 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
-}
-
-#[cfg(windows)]
-fn build_libmv_windows(manifest_dir: &str) {
-    let libmv_src = Path::new(manifest_dir).join("libmv/src");
-    let bin_dir = Path::new(manifest_dir).join("libmv/bin-static");
-    std::fs::create_dir_all(&bin_dir).expect("failed to create bin-static dir");
-
-    let eigen_dir = Path::new(manifest_dir).join("libmv/src/third_party/eigen");
-
-    // Configure
-    let status = Command::new("cmake")
-        .current_dir(&bin_dir)
-        .arg("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .arg("-DCMAKE_BUILD_TYPE=Release")
-        .arg(format!("-DEIGEN_INCLUDE_DIR={}", eigen_dir.display()))
-        .arg("-DSUITESPARSE=OFF")
-        .arg("-DCXSPARSE=OFF")
-        .arg("-DLAPACK=OFF")
-        .arg("-DOPENMP=OFF")
-        .arg("-DMINIGLOG=ON")
-        .arg("-DBUILD_TESTING=OFF")
-        .arg("-DCMAKE_SKIP_INSTALL_RULES=TRUE")
-        .arg(&libmv_src)
-        .status()
-        .expect("cmake configure failed");
-
-    assert!(status.success(), "cmake configure step failed");
-
-    // Build
-    let status = Command::new("cmake")
-        .current_dir(&bin_dir)
-        .arg("--build")
-        .arg(".")
-        .arg("--config")
-        .arg("Release")
-        .arg("--parallel")
-        .arg("8")
-        .status()
-        .expect("cmake build failed");
-
-    assert!(status.success(), "cmake build step failed");
 }
