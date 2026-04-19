@@ -54,31 +54,22 @@ fn main() {
 
     build_libmv(&manifest_dir);
 
-    let libmv_library_dir = if cfg!(feature = "dynamic") {
-        let libmv_library_dir = Path::new(&manifest_dir).join("libmv/bin-opt/lib");
-        if !libmv_library_dir.join("libmultiview.so").exists() {
-            panic!("Missing compiled libmultiview.so! (libmv build failure?)");
+    #[cfg(windows)]
+    let libmv_library_dir = {
+        // CMakeLists.txt sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE to bin-static-minimal/lib directly
+        let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
+        if !d.join("multiview.lib").exists() {
+            panic!("Missing compiled multiview.lib! (libmv build failure?)");
         }
-        libmv_library_dir
-    } else {
-        #[cfg(windows)]
-        let libmv_library_dir = {
-            // CMakeLists.txt sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE to bin-static-minimal/lib directly
-            let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
-            if !d.join("multiview.lib").exists() {
-                panic!("Missing compiled multiview.lib! (libmv build failure?)");
-            }
-            d
-        };
-        #[cfg(not(windows))]
-        let libmv_library_dir = {
-            let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
-            if !d.join("libmultiview.a").exists() {
-                panic!("Missing compiled libmultiview.a! (libmv build failure?)");
-            }
-            d
-        };
-        libmv_library_dir
+        d
+    };
+    #[cfg(not(windows))]
+    let libmv_library_dir = {
+        let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
+        if !d.join("libmultiview.a").exists() {
+            panic!("Missing compiled libmultiview.a! (libmv build failure?)");
+        }
+        d
     };
 
     println!(
@@ -87,54 +78,33 @@ fn main() {
     );
 
     // libmv libraries
-    if cfg!(feature = "dynamic") {
-        println!("cargo:rustc-link-lib=dylib=autotrack");
-        println!("cargo:rustc-link-lib=dylib=base");
-        println!("cargo:rustc-link-lib=dylib=camera");
-        println!("cargo:rustc-link-lib=dylib=correspondence");
-        println!("cargo:rustc-link-lib=dylib=descriptor");
-        println!("cargo:rustc-link-lib=dylib=detector");
-        println!("cargo:rustc-link-lib=dylib=image");
-        println!("cargo:rustc-link-lib=dylib=image_io");
-        println!("cargo:rustc-link-lib=dylib=multiview");
-        println!("cargo:rustc-link-lib=dylib=numeric");
-        println!("cargo:rustc-link-lib=dylib=reconstruction");
-        println!("cargo:rustc-link-lib=dylib=simple_pipeline");
-        println!("cargo:rustc-link-lib=dylib=tools");
-        println!("cargo:rustc-link-lib=dylib=tracking");
+    println!("cargo:rustc-link-lib=static=autotrack");
+    println!("cargo:rustc-link-lib=static=base");
+    println!("cargo:rustc-link-lib=static=camera");
+    println!("cargo:rustc-link-lib=static=correspondence");
+    println!("cargo:rustc-link-lib=static=descriptor");
+    println!("cargo:rustc-link-lib=static=detector");
+    println!("cargo:rustc-link-lib=static=image");
+    // println!("cargo:rustc-link-lib=static=image_io"); // appears to be included within `image` itself as well
+    println!("cargo:rustc-link-lib=static=multiview");
+    println!("cargo:rustc-link-lib=static=numeric");
+    println!("cargo:rustc-link-lib=static=reconstruction");
+    println!("cargo:rustc-link-lib=static=simple_pipeline");
+    println!("cargo:rustc-link-lib=static=tools");
+    println!("cargo:rustc-link-lib=static=tracking");
 
-        // Dependencies required for the C API wrapper itself
-        println!("cargo:rustc-link-lib=dylib=gflags");
-        println!("cargo:rustc-link-lib=dylib=glog");
-    } else {
-        println!("cargo:rustc-link-lib=static=autotrack");
-        println!("cargo:rustc-link-lib=static=base");
-        println!("cargo:rustc-link-lib=static=camera");
-        println!("cargo:rustc-link-lib=static=correspondence");
-        println!("cargo:rustc-link-lib=static=descriptor");
-        println!("cargo:rustc-link-lib=static=detector");
-        println!("cargo:rustc-link-lib=static=image");
-        // println!("cargo:rustc-link-lib=static=image_io"); // appears to be included within `image` itself as well
-        println!("cargo:rustc-link-lib=static=multiview");
-        println!("cargo:rustc-link-lib=static=numeric");
-        println!("cargo:rustc-link-lib=static=reconstruction");
-        println!("cargo:rustc-link-lib=static=simple_pipeline");
-        println!("cargo:rustc-link-lib=static=tools");
-        println!("cargo:rustc-link-lib=static=tracking");
+    // Dependencies required for the C API wrapper itself
+    println!("cargo:rustc-link-lib=static=gflags");
+    println!("cargo:rustc-link-lib=static=glog");
 
-        // Dependencies required for the C API wrapper itself
-        println!("cargo:rustc-link-lib=static=gflags");
-        println!("cargo:rustc-link-lib=static=glog");
-
-        // Runtime dependencies of libmv
-        println!("cargo:rustc-link-lib=static=colamd");
-        println!("cargo:rustc-link-lib=static=daisy");
-        println!("cargo:rustc-link-lib=static=fast");
-        println!("cargo:rustc-link-lib=static=flann");
-        println!("cargo:rustc-link-lib=static=ldl");
-        println!("cargo:rustc-link-lib=static=V3D");
-        println!("cargo:rustc-link-lib=static=ceres");
-    }
+    // Runtime dependencies of libmv
+    println!("cargo:rustc-link-lib=static=colamd");
+    println!("cargo:rustc-link-lib=static=daisy");
+    println!("cargo:rustc-link-lib=static=fast");
+    println!("cargo:rustc-link-lib=static=flann");
+    println!("cargo:rustc-link-lib=static=ldl");
+    println!("cargo:rustc-link-lib=static=V3D");
+    println!("cargo:rustc-link-lib=static=ceres");
 
     // libpng + zlib: on Linux these are system dylibs; on Windows built statically by libmv's cmake
     #[cfg(not(windows))]
