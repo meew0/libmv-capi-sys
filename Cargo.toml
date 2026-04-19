@@ -3,6 +3,11 @@ name = "libmv-capi-sys"
 version = "0.1.0"
 edition = "2021"
 links = "mv"
+license = "GPL-2.0-or-later"
+keywords = ["motion-tracking", "multiview", "libmv", "blender", "video"]
+categories = ["external-ffi-bindings"]
+description = "Unsafe FFI bindings for libmv, Blender's motion-tracking library"
+readme = "README.md"
 
 [build-dependencies]
 cc = "1.0"
