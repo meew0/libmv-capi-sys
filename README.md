@@ -1,5 +1,7 @@
 # `libmv-capi-sys`
 
+![Crates.io Version](https://img.shields.io/crates/v/libmv-capi-sys)
+
 Unsafe Rust FFI bindings around [libmv](https://projects.blender.org/blender/libmv), the motion tracking library used by [Blender](https://www.blender.org/). Makes use of [Blender's own C bindings](https://projects.blender.org/blender/blender/src/branch/main/intern/libmv/intern) combined with the [standalone distribution of libmv](https://projects.blender.org/blender/libmv).
 
 ## Usage
