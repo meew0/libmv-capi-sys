@@ -2,9 +2,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn build_libmv(manifest_dir: &str) {
+fn build_libmv(manifest_dir: &str, out_dir: &str) {
     let libmv_src = Path::new(manifest_dir).join("libmv/src");
-    let bin_dir = Path::new(manifest_dir).join("libmv/bin-static-minimal");
+    let bin_dir = Path::new(out_dir).join("libmv/bin-static-minimal");
     std::fs::create_dir_all(&bin_dir).expect("failed to create bin-static-minimal dir");
 
     let eigen_dir = Path::new(manifest_dir).join("libmv/src/third_party/eigen");
@@ -51,13 +51,14 @@ fn build_libmv(manifest_dir: &str) {
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR").unwrap();
 
-    build_libmv(&manifest_dir);
+    build_libmv(&manifest_dir, &out_dir);
 
     #[cfg(windows)]
     let libmv_library_dir = {
         // CMakeLists.txt sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE to bin-static-minimal/lib directly
-        let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
+        let d = Path::new(&out_dir).join("libmv/bin-static-minimal/lib");
         if !d.join("multiview.lib").exists() {
             panic!("Missing compiled multiview.lib! (libmv build failure?)");
         }
@@ -65,7 +66,7 @@ fn main() {
     };
     #[cfg(not(windows))]
     let libmv_library_dir = {
-        let d = Path::new(&manifest_dir).join("libmv/bin-static-minimal/lib");
+        let d = Path::new(&out_dir).join("libmv/bin-static-minimal/lib");
         if !d.join("libmultiview.a").exists() {
             panic!("Missing compiled libmultiview.a! (libmv build failure?)");
         }
