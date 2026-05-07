@@ -16,6 +16,8 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .arg("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
         .arg("-DBUILD_SHARED_LIBS=OFF")
         .arg("-DCMAKE_BUILD_TYPE=Release")
+        .arg("-DCMAKE_CXX_STANDARD=17")
+        .arg("-DCMAKE_CXX_STANDARD_REQUIRED=ON")
         .arg(format!("-DEIGEN_INCLUDE_DIR={}", eigen_dir.display()))
         .arg("-DSUITESPARSE=OFF")
         .arg("-DCXSPARSE=OFF")
@@ -155,7 +157,8 @@ fn main() {
         .flag_if_supported("-Wno-int-in-bool-context")
         .flag_if_supported("-Wno-deprecated-copy")
         .flag_if_supported("-Wno-sign-compare")
-        .flag_if_supported("-Wno-misleading-indentation");
+        .flag_if_supported("-Wno-misleading-indentation")
+        .flag_if_supported("-Wno-deprecated-enum-enum-conversion");
 
     build.compile("mv-capi");
 
