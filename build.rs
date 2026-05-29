@@ -18,6 +18,7 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .arg("-DCMAKE_BUILD_TYPE=Release")
         .arg("-DCMAKE_CXX_STANDARD=17")
         .arg("-DCMAKE_CXX_STANDARD_REQUIRED=ON")
+        .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
         .arg(format!("-DEIGEN_INCLUDE_DIR={}", eigen_dir.display()))
         .arg("-DSUITESPARSE=OFF")
         .arg("-DCXSPARSE=OFF")
