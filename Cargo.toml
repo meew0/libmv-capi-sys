@@ -1,6 +1,6 @@
 [package]
 name = "libmv-capi-sys"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 links = "mv"
 license = "GPL-2.0-or-later"
