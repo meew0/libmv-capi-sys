@@ -16,8 +16,6 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .arg("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
         .arg("-DBUILD_SHARED_LIBS=OFF")
         .arg("-DCMAKE_BUILD_TYPE=Release")
-        .arg("-DCMAKE_CXX_STANDARD=17")
-        .arg("-DCMAKE_CXX_STANDARD_REQUIRED=ON")
         .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
         .arg(format!("-DEIGEN_INCLUDE_DIR={}", eigen_dir.display()))
         .arg("-DSUITESPARSE=OFF")
@@ -25,8 +23,18 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .arg("-DLAPACK=OFF")
         .arg("-DOPENMP=OFF");
 
+    // MSVC removes std::binder1st/binder2nd (C++17) and std::tr1 that the
+    // bundled Eigen 3.2.7 and gtest rely on; C++14 keeps them. GCC/Clang are
+    // fine with C++17 because they retain those symbols as extensions.
     #[cfg(windows)]
-    command.arg("-DMINIGLOG=ON");
+    {
+        command.arg("-DCMAKE_CXX_STANDARD=14");
+        command.arg("-DMINIGLOG=ON");
+    }
+    #[cfg(not(windows))]
+    command.arg("-DCMAKE_CXX_STANDARD=17");
+
+    command.arg("-DCMAKE_CXX_STANDARD_REQUIRED=ON");
 
     let status = command
         .arg("-DBUILD_TESTING=OFF")
