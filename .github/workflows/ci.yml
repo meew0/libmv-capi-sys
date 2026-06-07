@@ -27,7 +27,7 @@ jobs:
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y cmake libjpeg-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libjpeg-dev libpng-dev
 
       - name: Set LIBCLANG_PATH (Windows)
         if: runner.os == 'Windows'
@@ -55,7 +55,7 @@ jobs:
 
       - name: Install Linux build dependencies
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y cmake libjpeg-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake libjpeg-dev libpng-dev
 
       - uses: ./.github/actions/setup-rust
         with:
