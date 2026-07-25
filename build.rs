@@ -41,9 +41,9 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .arg("-DCMAKE_SKIP_INSTALL_RULES=TRUE")
         .arg(&libmv_src)
         .status()
-        .expect("cmake configure failed");
+        .expect("cmake configure could not be run (is cmake installed & accessible?)");
 
-    assert!(status.success(), "cmake configure step failed");
+    assert!(status.success(), "cmake configure step completed unsuccessfully");
 
     // Build
     let status = Command::new("cmake")
@@ -55,9 +55,9 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .arg("--parallel")
         .arg("8")
         .status()
-        .expect("cmake build failed");
+        .expect("cmake build could not be run");
 
-    assert!(status.success(), "cmake build step failed");
+    assert!(status.success(), "cmake build step completed unsuccessfully");
 }
 
 fn main() {
