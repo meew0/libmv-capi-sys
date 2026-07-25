@@ -43,7 +43,10 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .status()
         .expect("cmake configure could not be run (is cmake installed & accessible?)");
 
-    assert!(status.success(), "cmake configure step completed unsuccessfully");
+    assert!(
+        status.success(),
+        "cmake configure step completed unsuccessfully"
+    );
 
     // Build
     let status = Command::new("cmake")
@@ -57,7 +60,10 @@ fn build_libmv(manifest_dir: &str, out_dir: &str) {
         .status()
         .expect("cmake build could not be run");
 
-    assert!(status.success(), "cmake build step completed unsuccessfully");
+    assert!(
+        status.success(),
+        "cmake build step completed unsuccessfully"
+    );
 }
 
 fn main() {
