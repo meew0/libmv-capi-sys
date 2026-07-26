@@ -160,7 +160,6 @@ const LINK_ORDER: &[&str] = &[
     "ldl",
     "glog",
     "gflags",
-
     // Relevant for Windows only.
     // On Linux these are system libraries rather than targets.
     "png",
