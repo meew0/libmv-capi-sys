@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }}, ${{ matrix.profile }})
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.profile }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -39,11 +39,56 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: build-${{ matrix.profile }}
+          cache-key: test-${{ matrix.profile }}
 
-      - name: Build
+      # Tests, not just a build. The `link` module takes the address of every
+      # function of every enabled feature, which is what forces the linker to
+      # resolve them; a plain `cargo build` proves very little about the
+      # libraries build.rs picked, because Rust emits no undefined symbol for an
+      # `extern` function that is declared but never referenced.
+      - name: Test
         shell: bash
-        run: cargo build ${{ matrix.profile == 'release' && '--release' || '' }}
+        run: cargo test ${{ matrix.profile == 'release' && '--release' || '' }}
+
+  # Each feature on its own. This is *not* redundant with the job above: when
+  # every feature is enabled, every libmv library gets built, so an incomplete
+  # `targets` list in build.rs is masked by whichever other area happens to pull
+  # the missing library in. Enabling a single area is the only configuration in
+  # which such an omission actually fails.
+  #
+  # Linux and debug only. The cmake build is always Release regardless of the
+  # Cargo profile, so the profile changes nothing about what gets linked, and
+  # the job above already covers Windows.
+  feature:
+    name: Feature (${{ matrix.feature }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature:
+          - image
+          - track-region
+          - homography
+          - camera-intrinsics
+          - tracks
+          - detector
+          - autotrack
+          - reconstruction
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y cmake libjpeg-dev libpng-dev
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: feature-${{ matrix.feature }}
+
+      - name: Test
+        run: cargo test --no-default-features --features ${{ matrix.feature }}
 
   clippy:
     name: Clippy (ubuntu-latest)
@@ -64,6 +109,12 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      # The generated bindings differ per feature set, so lint a minimal one
+      # too. This is what catches a `cfg(feature = ...)` in the tests that no
+      # longer lines up with the bindings actually generated for that set.
+      - name: Run clippy (minimal features)
+        run: cargo clippy --all-targets --no-default-features --features track-region -- -D warnings
 
   fmt:
     name: Rustfmt (ubuntu-latest)
