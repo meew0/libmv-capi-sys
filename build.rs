@@ -160,6 +160,11 @@ const LINK_ORDER: &[&str] = &[
     "ldl",
     "glog",
     "gflags",
+
+    // Relevant for Windows only.
+    // On Linux these are system libraries rather than targets.
+    "png",
+    "zlib",
 ];
 
 fn feature_enabled(feature: &str) -> bool {
@@ -487,6 +492,17 @@ fn build_real(
     areas: &[&'static Area],
     targets: &BTreeSet<&str>,
 ) {
+    // libpng and zlib are system libraries on Linux,
+    // but on Windows libmv builds its own bundled copies,
+    // which makes them ordinary cmake targets that have to be requested explicitly.
+    #[cfg(windows)]
+    let targets = &{
+        let mut targets = (*targets).clone();
+        targets.insert("png");
+        targets.insert("zlib");
+        targets
+    };
+
     let flags = cmake_flags(manifest_dir);
     let compiler = compiler_identity();
     let (build_root, cached) = libmv_build_root(manifest_dir, out_dir, &flags, targets, &compiler);
@@ -511,14 +527,10 @@ fn build_real(
         println!("cargo:rustc-link-lib=static={library}");
     }
 
-    // libpng + zlib: on Linux these are system dylibs; on Windows built statically by libmv's cmake
+    // On Linux libpng is a system shared library, so it is not a cmake target
+    // and is not covered by the loop above.
     #[cfg(not(windows))]
     println!("cargo:rustc-link-lib=dylib=png");
-    #[cfg(windows)]
-    {
-        println!("cargo:rustc-link-lib=static=png");
-        println!("cargo:rustc-link-lib=static=zlib");
-    }
 
     // Compilation script adapted from https://github.com/h33p/ofps/blob/b18a0dda2981def429634834b4bce0acfbeffa22/libmv-rust/build.rs
 
@@ -560,34 +572,25 @@ fn build_real(
 /// Generates `bindings.rs` for the enabled areas. Identical in stub and real
 /// builds, so that the two are interchangeable.
 fn generate_bindings(manifest_dir: &Path, areas: &[&'static Area]) {
-    let capi_absolute_path = std::fs::canonicalize(manifest_dir.join("capi"))
-        .expect("canonicalizing the capi path should succeed");
+    // `CARGO_MANIFEST_DIR` is already absolute,
+    // so we don't need any further canonicalization
+    let capi_dir = manifest_dir.join("capi");
 
-    // The header must be given as an absolute path
     let mut bindings = bindgen::Builder::default()
-        .header(
-            capi_absolute_path
-                .join("libmv-capi.h")
-                .display()
-                .to_string(),
-        )
-        .clang_arg(format!("-I{}", capi_absolute_path.display()))
+        .header(capi_dir.join("libmv-capi.h").display().to_string())
+        .clang_arg(format!("-I{}", capi_dir.display()))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .derive_default(true);
 
     // `libmv-capi.h` includes every area's header regardless of which ones are
     // being built, so we need to restrict the output to the enabled ones.
     // bindgen will still emit any type they transitively depend on.
+    //
+    // These match on the trailing `intern/<name>.h` rather than on the full
+    // path, and accept backslashes or forward slashes, to ensure reproducibility
+    // across different platforms and build runs.
     for header in areas.iter().flat_map(|area| area.headers) {
-        bindings = bindings.allowlist_file(format!(
-            ".*{}",
-            regex_escape(
-                &capi_absolute_path
-                    .join(format!("intern/{header}.h"))
-                    .display()
-                    .to_string()
-            )
-        ));
+        bindings = bindings.allowlist_file(format!(r".*[/\\]intern[/\\]{header}\.h"));
     }
 
     let bindings = bindings.generate().expect("Unable to generate bindings");
@@ -597,18 +600,4 @@ fn generate_bindings(manifest_dir: &Path, areas: &[&'static Area]) {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
-}
-
-/// Escapes the regex metacharacters that can occur in a path, so that
-/// `allowlist_file` matches it literally.
-fn regex_escape(path: &str) -> String {
-    path.chars()
-        .flat_map(|c| {
-            let escape = matches!(
-                c,
-                '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$' | '\\'
-            );
-            escape.then_some('\\').into_iter().chain(std::iter::once(c))
-        })
-        .collect()
 }
