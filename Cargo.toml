@@ -10,6 +10,30 @@ description = "Unsafe FFI bindings for libmv, Blender's motion-tracking library"
 readme = "README.md"
 repository = "https://github.com/meew0/libmv-capi-sys"
 
+[features]
+# Enable all areas by default
+default = ["full"]
+
+full = [
+    "autotrack",
+    "camera-intrinsics",
+    "detector",
+    "homography",
+    "image",
+    "reconstruction",
+    "track-region",
+    "tracks",
+]
+
+image = []
+track-region = ["image"]
+homography = []
+camera-intrinsics = []
+tracks = []
+detector = ["image"]
+autotrack = ["track-region"]
+reconstruction = ["camera-intrinsics"]
+
 [build-dependencies]
 cc = "1.0"
 bindgen = "0.68"

@@ -10,6 +10,29 @@ See [src/lib.rs](https://github.com/meew0/libmv-capi-sys/blob/master/src/lib.rs)
 
 Unfortunately, there is almost no documentation available on how to use libmv. In cases where the function names and signatures in the C header files aren't self-explanatory, your best bet is probably checking Blender's source code for how the functions are used.
 
+## Features
+
+By default the entirety of libmv is built, which takes a few minutes. If you only need part of the C API, you can enable only the features you need. For example, `track-region` alone is roughly three times faster to build than `full`.
+
+| Feature | C API |
+| --- | --- |
+| `full` (default) | everything below |
+| `image` | image conversion and planar patch sampling |
+| `track-region` | tracking a single region between two images (implies `image`) |
+| `homography` | 2D homography from correspondences |
+| `camera-intrinsics` | camera intrinsics, distortion and undistortion |
+| `tracks` | the `simple_pipeline` track container |
+| `detector` | feature detection (implies `image`) |
+| `autotrack` | autotrack, its track container and frame accessors (implies `track-region`) |
+| `reconstruction` | modal and full reconstruction solving (implies `camera-intrinsics`) |
+
+Logging is always available. Functions belonging to a disabled feature are left out of the generated bindings, so calling one will result in a compile-time error (rather than a link-time one).
+
+```toml
+[dependencies]
+libmv-capi-sys = { version = "0.1", default-features = false, features = ["track-region"] }
+```
+
 ## Important licensing note
 
 While libmv itself is MIT licensed, the C bindings come directly from Blender's source code, which is licensed as GPLv2 or later. As a consequence, this crate is also licensed as GPLv2 or later, which you must keep in mind when using it.
