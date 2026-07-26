@@ -33,6 +33,29 @@ Logging is always available. Functions belonging to a disabled feature are left 
 libmv-capi-sys = { version = "0.1", default-features = false, features = ["track-region"] }
 ```
 
+## Environment variables
+
+### `LIBMV_CAPI_SYS_CACHE_DIR`
+
+Stores the built libmv libraries in the given directory instead of inside `OUT_DIR`.
+
+`OUT_DIR` is discarded by `cargo clean` and is not shared between profiles, so by default a debug and a release build will build all of libmv separately, and any change that gives the crate a new metadata hash (a dependency bump, a `RUSTFLAGS` change, etc.) unnecessarily discards the build. The cmake build is always `Release` and does not depend on most of those factors, so setting the build target folder to a directory outside `target/` avoids this repetition.
+
+Entries are named by a hash of everything that changes the libraries produced: the libmv sources (including uncommitted changes), the cmake flags, the enabled features, the target triple and the C++ compiler's major version. A stale entry will never be reused. Changing any of those details will simply build a new one. If the directory cannot be created, the build falls back to `OUT_DIR` with a warning, so this property is safe to set unconditionally.
+
+A convenient way to set it for one project is via `.cargo/config.toml`:
+
+```toml
+[env]
+LIBMV_CAPI_SYS_CACHE_DIR = { value = "target/libmv-cache", relative = true }
+```
+
+### `LIBMV_CAPI_SYS_STUB`
+
+If enabled, a stub implementation of the C API will be built instead of libmv. In the stub implementation, every function exists but does nothing (and reports failure), and no cmake, Ceres or libmv build is needed at all. Building it takes less than a second, rather than minutes.
+
+The generated bindings are identical, so a stub build and a real one are interchangeable at compile time Only the runtime behavior is different. This makes it useful for jobs that never execute any code, such as CI lint runs. By design, the test suite will fail if the stub implementation is enabled.
+
 ## Important licensing note
 
 While libmv itself is MIT licensed, the C bindings come directly from Blender's source code, which is licensed as GPLv2 or later. As a consequence, this crate is also licensed as GPLv2 or later, which you must keep in mind when using it.

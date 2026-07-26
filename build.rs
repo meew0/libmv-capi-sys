@@ -175,28 +175,143 @@ fn enabled_areas() -> Vec<&'static Area> {
         .collect()
 }
 
-/// Configures and builds libmv, returning the directory holding the resulting
-/// static libraries.
-fn build_libmv(manifest_dir: &str, out_dir: &str, targets: &BTreeSet<&str>) -> PathBuf {
-    let libmv_src = Path::new(manifest_dir).join("libmv/src");
-    let bin_dir = Path::new(out_dir).join("libmv/bin-static-minimal");
-    std::fs::create_dir_all(&bin_dir).expect("failed to create bin-static-minimal dir");
+const CACHE_DIR_VAR: &str = "LIBMV_CAPI_SYS_CACHE_DIR";
+const STUB_VAR: &str = "LIBMV_CAPI_SYS_STUB";
 
-    let eigen_dir = Path::new(manifest_dir).join("libmv/src/third_party/eigen");
+/// The hash function used to name cache directories.
+///
+/// Does not need to be cryptographic, but needs to be consistent across environments,
+/// so we implement it manually rather than using the Rust stdlib.
+fn hash(bytes: &[u8], seed: u64) -> u64 {
+    bytes.iter().fold(seed, |accumulator, byte| {
+        (accumulator ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
 
-    // Configure
-    let mut command = Command::new("cmake");
-    command
-        .current_dir(&bin_dir)
-        .arg("-DCMAKE_POLICY_VERSION_MINIMUM=3.5")
-        .arg("-DBUILD_SHARED_LIBS=OFF")
-        .arg("-DCMAKE_BUILD_TYPE=Release")
-        .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
-        .arg(format!("-DEIGEN_INCLUDE_DIR={}", eigen_dir.display()))
-        .arg("-DSUITESPARSE=OFF")
-        .arg("-DCXSPARSE=OFF")
-        .arg("-DLAPACK=OFF")
-        .arg("-DOPENMP=OFF");
+/// Runs a command, returning its stdout if it succeeded.
+fn output_of(program: &str, arguments: &[&str], directory: &Path) -> Option<String> {
+    let output = Command::new(program)
+        .args(arguments)
+        .current_dir(directory)
+        .output()
+        .ok()?;
+
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Generate a hash for the current state of the libmv source tree,
+/// based on the current commit and the content hashes of uncommitted files.
+fn libmv_revision(manifest_dir: &Path) -> String {
+    let libmv = manifest_dir.join("libmv");
+
+    let Some(commit) = output_of("git", &["rev-parse", "HEAD"], &libmv) else {
+        return format!("v{}", env::var("CARGO_PKG_VERSION").unwrap_or_default());
+    };
+
+    let mut revision = commit.trim().to_owned();
+
+    let dirty = output_of("git", &["status", "--porcelain", "-uall"], &libmv);
+    for line in dirty.iter().flat_map(|status| status.lines()) {
+        let Some(path) = line.get(3..) else { continue };
+        let contents = std::fs::read(libmv.join(path)).unwrap_or_default();
+        revision.push_str(&format!(
+            "+{path}:{:016x}",
+            hash(&contents, 0x1a2b_3c4d_5e6f_7a8b)
+        ));
+    }
+
+    revision
+}
+
+/// Determine the directory the libmv build output should be stored in,
+/// and whether something is already stored in that directory.
+///
+/// By default this is inside `OUT_DIR`, which Cargo discards on `cargo clean`
+/// and does not share between profiles, so switching between debug and release
+/// rebuilds all of libmv even though the cmake build is always `Release`.
+/// Setting `LIBMV_CAPI_SYS_CACHE_DIR` moves it somewhere
+/// such that the output persists across Cargo profiles.
+///
+/// The directory name is a hash of all the factors that might change the produced libraries:
+/// the libmv sources, the cmake flags, the targets being built, the target triple and the compiler.
+/// Notably it does *not* include the Cargo profile or anything else that varies `OUT_DIR`.
+fn libmv_build_root(
+    manifest_dir: &Path,
+    out_dir: &Path,
+    flags: &[String],
+    targets: &BTreeSet<&str>,
+    compiler: &str,
+) -> (PathBuf, bool) {
+    let mut key = 0x9a8b_7c6d_5e4f_3a2b;
+    key = hash(libmv_revision(manifest_dir).as_bytes(), key);
+    key = hash(compiler.as_bytes(), key);
+    key = hash(env::var("TARGET").unwrap_or_default().as_bytes(), key);
+    for flag in flags {
+        key = hash(flag.as_bytes(), key);
+    }
+    for target in targets {
+        key = hash(target.as_bytes(), key);
+    }
+
+    let Some(cache) = env::var_os(CACHE_DIR_VAR) else {
+        return (out_dir.join(format!("libmv-{key:016x}")), false);
+    };
+
+    let cache = PathBuf::from(cache);
+    if std::fs::create_dir_all(&cache).is_err() {
+        // Fall back to OUT_DIR when we cannot use the specified cache directory
+        println!(
+            "cargo:warning={CACHE_DIR_VAR} is set to {} but could not be created; \
+             building into OUT_DIR instead",
+            cache.display()
+        );
+        return (out_dir.join(format!("libmv-{key:016x}")), false);
+    }
+
+    let directory = cache.join(format!("libmv-{key:016x}"));
+    let cached = directory.is_dir();
+    (directory, cached)
+}
+
+/// The C++ compiler cmake will use,
+/// identified with enough precision such that a toolchain change,
+/// but not a minor bugfix update, will invalidate the build cache.
+fn compiler_identity() -> String {
+    let compiler = cc::Build::new().cpp(true).get_compiler();
+    let path = compiler.path().to_path_buf();
+
+    let version = output_of(&path.display().to_string(), &["--version"], Path::new("."))
+        .and_then(|text| text.lines().next().map(str::to_owned))
+        .unwrap_or_default();
+
+    // Keep the leading component of the first `x.y.z` found, if any.
+    let major = version
+        .split(|c: char| !c.is_ascii_digit() && c != '.')
+        .find(|token| token.split('.').count() >= 3)
+        .and_then(|token| token.split('.').next())
+        .unwrap_or("unknown");
+
+    format!("{}-{major}", path.display())
+}
+
+/// The cmake flags used for building libmv.
+fn cmake_flags(manifest_dir: &Path) -> Vec<String> {
+    let eigen_dir = manifest_dir.join("libmv/src/third_party/eigen");
+
+    let mut flags = vec![
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5".to_owned(),
+        "-DBUILD_SHARED_LIBS=OFF".to_owned(),
+        "-DCMAKE_BUILD_TYPE=Release".to_owned(),
+        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON".to_owned(),
+        format!("-DEIGEN_INCLUDE_DIR={}", eigen_dir.display()),
+        "-DSUITESPARSE=OFF".to_owned(),
+        "-DCXSPARSE=OFF".to_owned(),
+        "-DLAPACK=OFF".to_owned(),
+        "-DOPENMP=OFF".to_owned(),
+    ];
 
     // Ceres' fixed-size Schur eliminator specializations are half of its
     // translation units and a fifth of the whole build, but they only speed up
@@ -205,7 +320,7 @@ fn build_libmv(manifest_dir: &str, out_dir: &str, targets: &BTreeSet<&str>) -> P
     // problems with DENSE_QR and will never benefit from those,
     // so we can disable the specializations otherwise.
     if !feature_enabled("reconstruction") {
-        command.arg("-DSCHUR_SPECIALIZATIONS=OFF");
+        flags.push("-DSCHUR_SPECIALIZATIONS=OFF".to_owned());
     }
 
     // MSVC removes std::binder1st/binder2nd (C++17) and std::tr1 that the
@@ -213,17 +328,40 @@ fn build_libmv(manifest_dir: &str, out_dir: &str, targets: &BTreeSet<&str>) -> P
     // fine with C++17 because they retain those symbols as extensions.
     #[cfg(windows)]
     {
-        command.arg("-DCMAKE_CXX_STANDARD=14");
-        command.arg("-DMINIGLOG=ON");
+        flags.push("-DCMAKE_CXX_STANDARD=14".to_owned());
+        flags.push("-DMINIGLOG=ON".to_owned());
     }
     #[cfg(not(windows))]
-    command.arg("-DCMAKE_CXX_STANDARD=17");
+    flags.push("-DCMAKE_CXX_STANDARD=17".to_owned());
 
-    command.arg("-DCMAKE_CXX_STANDARD_REQUIRED=ON");
+    flags.push("-DCMAKE_CXX_STANDARD_REQUIRED=ON".to_owned());
+    flags.push("-DBUILD_TESTING=OFF".to_owned());
+    flags.push("-DCMAKE_SKIP_INSTALL_RULES=TRUE".to_owned());
 
-    let status = command
-        .arg("-DBUILD_TESTING=OFF")
-        .arg("-DCMAKE_SKIP_INSTALL_RULES=TRUE")
+    flags
+}
+
+/// Configures and builds libmv, and returns the directory holding the resulting
+/// static libraries.
+///
+/// The build steps are run in a scratch directory and only moved into place once
+/// the build has succeeded, so an interrupted or failing build never leaves something
+/// behind that a later run might mistake for a finished one.
+fn build_libmv(
+    manifest_dir: &Path,
+    build_root: &Path,
+    flags: &[String],
+    targets: &BTreeSet<&str>,
+) -> PathBuf {
+    let libmv_src = manifest_dir.join("libmv/src");
+
+    let scratch = build_root.with_extension(format!("partial-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).expect("failed to create the libmv build directory");
+
+    let status = Command::new("cmake")
+        .current_dir(&scratch)
+        .args(flags)
         .arg(&libmv_src)
         .status()
         .expect("cmake configure could not be run (is cmake installed & accessible?)");
@@ -238,7 +376,7 @@ fn build_libmv(manifest_dir: &str, out_dir: &str, targets: &BTreeSet<&str>) -> P
     // so e.g. asking for `simple_pipeline` also builds `V3D`, `multiview` and `image`.
     let mut command = Command::new("cmake");
     command
-        .current_dir(&bin_dir)
+        .current_dir(&scratch)
         .arg("--build")
         .arg(".")
         .arg("--config")
@@ -255,14 +393,43 @@ fn build_libmv(manifest_dir: &str, out_dir: &str, targets: &BTreeSet<&str>) -> P
 
     let status = command.status().expect("cmake build could not be run");
 
-    assert!(
-        status.success(),
-        "cmake build step completed unsuccessfully"
-    );
+    if !status.success() {
+        let _ = std::fs::remove_dir_all(&scratch);
+        panic!("cmake build step completed unsuccessfully");
+    }
+
+    if std::fs::rename(&scratch, build_root).is_err() {
+        // Either another build finished first, or the scratch directory and the
+        // cache are on different filesystems. Both are fine as long as the
+        // libraries ended up somewhere; prefer whatever is already published.
+        if build_root.is_dir() {
+            let _ = std::fs::remove_dir_all(&scratch);
+        } else {
+            return scratch.join("lib");
+        }
+    }
 
     // CMakeLists.txt sets CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE to
-    // bin-static-minimal/lib directly on both platforms.
-    bin_dir.join("lib")
+    // <build dir>/lib directly on both platforms.
+    build_root.join("lib")
+}
+
+/// Builds the stub implementation of the C API instead of libmv and the real C API.
+fn build_stub() {
+    println!(
+        "cargo:warning={STUB_VAR} is set: libmv is stubbed out. every libmv_* function will do nothing and report failure"
+    );
+
+    println!("cargo:rerun-if-changed=capi/intern/stub.cc");
+
+    cc::Build::new()
+        .cpp(true)
+        .file("capi/intern/stub.cc")
+        .include("capi")
+        .include("libmv/src")
+        .include("libmv/src/third_party/eigen")
+        .flag_if_supported("-Wno-unused-parameter")
+        .compile("mv-capi");
 }
 
 /// Panics with a useful message if a target that was asked for did not produce
@@ -283,8 +450,8 @@ fn verify_built(library_dir: &Path, targets: &BTreeSet<&str>) {
 }
 
 fn main() {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let areas = enabled_areas();
 
@@ -299,8 +466,38 @@ fn main() {
         .copied()
         .collect();
 
-    let library_dir = build_libmv(&manifest_dir, &out_dir, &targets);
-    verify_built(&library_dir, &targets);
+    // Toggling either of these has to re-run the script, or the previous run's
+    // artifacts are silently kept and the change will appear to do nothing.
+    println!("cargo:rerun-if-env-changed={STUB_VAR}");
+    println!("cargo:rerun-if-env-changed={CACHE_DIR_VAR}");
+
+    if env::var_os(STUB_VAR).is_some() {
+        build_stub();
+    } else {
+        build_real(&manifest_dir, &out_dir, areas.as_slice(), &targets);
+    }
+
+    generate_bindings(&manifest_dir, areas.as_slice());
+}
+
+/// Builds libmv and the parts of the C API wrapper the enabled areas need.
+fn build_real(
+    manifest_dir: &Path,
+    out_dir: &Path,
+    areas: &[&'static Area],
+    targets: &BTreeSet<&str>,
+) {
+    let flags = cmake_flags(manifest_dir);
+    let compiler = compiler_identity();
+    let (build_root, cached) = libmv_build_root(manifest_dir, out_dir, &flags, targets, &compiler);
+
+    let library_dir = if cached {
+        build_root.join("lib")
+    } else {
+        build_libmv(manifest_dir, &build_root, &flags, targets)
+    };
+
+    verify_built(&library_dir, targets);
 
     println!("cargo:rustc-link-search=native={}", library_dir.display());
 
@@ -358,8 +555,12 @@ fn main() {
         .flag_if_supported("-Wno-deprecated-enum-enum-conversion");
 
     build.compile("mv-capi");
+}
 
-    let capi_absolute_path = std::fs::canonicalize(Path::new(&manifest_dir).join("capi"))
+/// Generates `bindings.rs` for the enabled areas. Identical in stub and real
+/// builds, so that the two are interchangeable.
+fn generate_bindings(manifest_dir: &Path, areas: &[&'static Area]) {
+    let capi_absolute_path = std::fs::canonicalize(manifest_dir.join("capi"))
         .expect("canonicalizing the capi path should succeed");
 
     // The header must be given as an absolute path
